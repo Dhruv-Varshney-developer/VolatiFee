@@ -81,7 +81,7 @@ contract VolatilityBasedFeesHook is BaseHook {
         PoolKey calldata key,
         uint160,
         bytes calldata
-    ) internal pure override returns (bytes4) {
+    ) internal pure returns (bytes4) {
         require(key.fee.isDynamicFee(), "Pool must use dynamic fee");
         return this.beforeInitialize.selector;
     }
@@ -100,7 +100,7 @@ contract VolatilityBasedFeesHook is BaseHook {
         uint160 sqrtPriceX96,
         int24,
         bytes calldata
-    ) internal override returns (bytes4) {
+    ) internal returns (bytes4) {
         // Create a unique pool ID from the pool key parameters.
         bytes32 poolId = keccak256(abi.encode(key));
         // Store the initial price in the lastPrices mapping.
