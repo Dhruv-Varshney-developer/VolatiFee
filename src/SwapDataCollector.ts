@@ -1,15 +1,14 @@
 import { ethers } from "ethers";
 
-// Uniswap V4 Pool Manager ABI (simplified)
-const POOL_MANAGER_ABI = [
-  "function getSlot0(bytes32) external view returns (uint160 sqrtPriceX96, int24 tick, uint16 observationIndex, uint16 observationCardinality, uint16 observationCardinalityNext, uint8 feeProtocol, bool unlocked)",
-  "event Swap(bytes32 indexed id, address indexed sender, address recipient, int256 amount0, int256 amount1, uint160 sqrtPriceX96, uint128 liquidity, int24 tick)",
+// Uniswap V3 Pool ABI (simplified)
+const UNISWAP_V3_POOL_ABI = [
+  "function slot0() external view returns (uint160 sqrtPriceX96, int24 tick, uint16 observationIndex, uint16 observationCardinality, uint16 observationCardinalityNext, uint8 feeProtocol, bool unlocked)",
+  "event Swap(address indexed sender, address indexed recipient, int256 amount0, int256 amount1, uint160 sqrtPriceX96, uint128 liquidity, int24 tick)",
 ];
 
 export class SwapDataCollector {
   private provider: ethers.Provider;
-  private poolManager: ethers.Contract;
-  private poolId: string; // bytes32 pool ID
+  private pool: ethers.Contract;
 
   // Store historical price data
   private priceData: {
@@ -19,18 +18,13 @@ export class SwapDataCollector {
     sqrtPriceX96: bigint;
   }[] = [];
 
-  constructor(
-    rpcUrl: string,
-    poolManagerAddress: string = "0xE03A1074c86CFeDd5C142C4F04F1a1536e203543",
-    poolId: string
-  ) {
+  constructor(rpcUrl: string = "https://ethereum-rpc.publicnode.com", poolAddress: string= "0x4e68Ccd3E89f51C3074ca5072bbAC773960dFa36") {
     this.provider = new ethers.JsonRpcProvider(rpcUrl);
-    this.poolManager = new ethers.Contract(
-      poolManagerAddress,
-      POOL_MANAGER_ABI,
+    this.pool = new ethers.Contract(
+      poolAddress,
+      UNISWAP_V3_POOL_ABI,
       this.provider
     );
-    this.poolId = poolId;
   }
 
   /**
@@ -54,8 +48,8 @@ export class SwapDataCollector {
     tick: number;
     sqrtPriceX96: bigint;
   }> {
-    // Get current state from pool manager using poolId
-    const slot0 = await this.poolManager.getSlot0(this.poolId);
+    // Get current state directly from the pool
+    const slot0 = await this.pool.slot0();
     const sqrtPriceX96 = slot0.sqrtPriceX96;
     const tick = slot0.tick;
     const price = this.sqrtPriceX96ToPrice(sqrtPriceX96);
@@ -126,21 +120,15 @@ export class SwapDataCollector {
    * Start listening for swap events in real-time
    */
   async startListening(callback?: (data: any) => void): Promise<void> {
-    console.log(
-      `Starting to listen for swap events for pool ID: ${this.poolId}...`
-    );
+    console.log(`Starting to listen for swap events for pool...`);
 
     // Get initial price
     await this.getCurrentPrice();
 
-    // Create filter for the specific pool ID
-    const filter = this.poolManager.filters.Swap(this.poolId);
-
-    // Listen for swap events
-    this.poolManager.on(
-      filter,
+    // Listen for swap events (no need for specific pool ID filter)
+    this.pool.on(
+      "Swap",
       async (
-        id,
         sender,
         recipient,
         amount0,
@@ -207,12 +195,12 @@ export class SwapDataCollector {
     const fromBlock = currentBlock - blockCount;
 
     console.log(
-      `Fetching swap events for pool ID ${this.poolId} from block ${fromBlock} to ${currentBlock}...`
+      `Fetching swap events from block ${fromBlock} to ${currentBlock}...`
     );
 
-    // Create filter for the specific pool ID
-    const swapFilter = this.poolManager.filters.Swap(this.poolId);
-    const events = await this.poolManager.queryFilter(
+    // Create filter for Swap events (no specific pool ID needed)
+    const swapFilter = this.pool.filters.Swap();
+    const events = await this.pool.queryFilter(
       swapFilter,
       fromBlock,
       currentBlock
