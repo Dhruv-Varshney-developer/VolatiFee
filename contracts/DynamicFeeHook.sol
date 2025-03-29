@@ -14,10 +14,7 @@ import {BaseHook} from "@uniswap/v4-periphery/src/utils/BaseHook.sol";
  * @notice Interface for the Arbitrum Stylus dynamic fee calculator
  */
 interface IDynamicFeeCalculator {
-    function calculateFee(
-        uint32 volatility,
-        int32[] calldata additionalFeatures
-    ) external view returns (uint32 fee);
+    function calculateFee(uint32 volatility) external view returns (uint32 fee);
 }
 
 /**
@@ -116,14 +113,8 @@ contract DynamicFeeHook is BaseHook {
             return DEFAULT_FEE;
         }
 
-        // Get additional features (empty for now, can be extended)
-        int32[] memory additionalFeatures = new int32[](0);
-
         // Calculate fee using Stylus calculator
-        uint32 calculatedFee = feeCalculator.calculateFee(
-            volatility,
-            additionalFeatures
-        );
+        uint32 calculatedFee = feeCalculator.calculateFee(volatility);
 
         // Ensure fee is within bounds
         if (calculatedFee < MIN_FEE) {
@@ -188,7 +179,7 @@ contract DynamicFeeHook is BaseHook {
         PoolKey calldata key,
         uint160,
         bytes calldata
-    ) internal returns (bytes4) {
+    ) internal pure returns (bytes4) {
         require(key.fee.isDynamicFee(), "Pool must use dynamic fee");
         return BaseHook.beforeInitialize.selector;
     }
