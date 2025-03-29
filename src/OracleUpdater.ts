@@ -1,18 +1,17 @@
-import { ethers } from 'ethers';
-import { SwapDataCollector } from './SwapDataCollector';
+import { ethers } from "ethers";
+import { SwapDataCollector } from "./SwapDataCollector";
 
 // Oracle ABI (minimal version with just what we need)
 const ORACLE_ABI = [
-  'function updateVolatility(bytes32 poolId, uint32 volatility) external returns (bool)',
-  'function lastUpdateTime(bytes32) external view returns (uint256)',
-  'function lastVolatility(bytes32) external view returns (uint32)'
+  "function updateVolatility(bytes32 poolId, uint32 volatility) external returns (bool)",
+  "function lastVolatility(bytes32) external view returns (uint32)",
 ];
 
 // Update interface to use pool address instead of pool ID
 interface PoolInfo {
-  address: string;  // Pool address
-  poolId: string;   // V4 Hook poolId for the oracle
-  name: string;     // Human-readable name for logging
+  address: string; // Pool address
+  poolId: string; // V4 Hook poolId for the oracle
+  name: string; // Human-readable name for logging
 }
 
 export class OracleUpdater {
@@ -21,9 +20,9 @@ export class OracleUpdater {
   private oracleContract: ethers.Contract;
   private dataCollectors: Map<string, SwapDataCollector> = new Map();
   private pools: PoolInfo[] = [];
-  
+
   constructor(
-    rpcUrl: string, 
+    rpcUrl: string,
     privateKey: string,
     oracleAddress: string,
     pools: PoolInfo[]
@@ -36,7 +35,7 @@ export class OracleUpdater {
       this.wallet
     );
     this.pools = pools;
-    
+
     // Initialize data collectors for each pool using pool address
     for (const pool of pools) {
       this.dataCollectors.set(
@@ -45,34 +44,36 @@ export class OracleUpdater {
       );
     }
   }
-  
+
   /**
    * Initialize data collectors by fetching historical data
    */
   async initialize() {
     console.log("Initializing data collectors with historical data...");
-    
+
     const promises: Promise<void>[] = [];
     for (const [poolId, collector] of this.dataCollectors.entries()) {
-      const pool = this.pools.find(p => p.poolId === poolId);
+      const pool = this.pools.find((p) => p.poolId === poolId);
       console.log(`Fetching historical data for ${pool?.name || poolId}...`);
-      
+
       promises.push(collector.fetchHistoricalSwaps(5000));
     }
-    
+
     await Promise.all(promises);
     console.log("Initialization complete!");
   }
-  
+
   /**
    * Start monitoring pools and updating the oracle
    */
   async startMonitoring(updateIntervalMs: number = 300000) {
-    console.log(`Starting to monitor pools with update interval of ${updateIntervalMs}ms`);
-    
+    console.log(
+      `Starting to monitor pools with update interval of ${updateIntervalMs}ms`
+    );
+
     // First update
     await this.updateOracle();
-    
+
     // Set update interval
     setInterval(async () => {
       try {
@@ -81,75 +82,103 @@ export class OracleUpdater {
         console.error("Error updating oracle:", error);
       }
     }, updateIntervalMs);
-    
+
     // Start listening for swap events
     this.startSwapListeners();
   }
-  
+
   /**
    * Update the oracle with current volatility data
    */
   async updateOracle() {
     console.log("Updating oracle with latest volatility data...");
-    
+
     for (const pool of this.pools) {
       try {
         const collector = this.dataCollectors.get(pool.poolId);
         if (!collector) continue;
-        
+
         // Fetch current price to ensure we have the latest data
         await collector.getCurrentPrice();
-        
+
         // Calculate volatility
         const metrics = collector.getVolatilityMetrics();
-        
+
         // Use medium-term volatility (1 day) for the fee calculation
         const volatility = Math.round(metrics.mediumTerm);
-        
+        /*
         // Check if update is needed (value changed or time elapsed)
-        const lastUpdateTime = await this.oracleContract.lastUpdateTime(pool.poolId);
-        const lastVolatility = await this.oracleContract.lastVolatility(pool.poolId);
-        
-        const timeSinceLastUpdate = Date.now() / 1000 - lastUpdateTime.toNumber();
+        const lastUpdateTime = await this.oracleContract.lastUpdateTime(
+          pool.poolId
+        );
+        const lastVolatility = await this.oracleContract.lastVolatility(
+          pool.poolId
+        );
+
+        const timeSinceLastUpdate =
+          Date.now() / 1000 - lastUpdateTime.toNumber();
         const volatilityDifference = Math.abs(lastVolatility - volatility);
         const significantChange = volatilityDifference > 50; // 0.5% change threshold
-        
+
         // Update if significant change or more than 1 hour passed
         if (significantChange || timeSinceLastUpdate > 3600) {
-          console.log(`Updating ${pool.name}: Volatility = ${volatility / 100}% (change: ${volatilityDifference / 100}%)`);
-          
-          // Convert volatility to the format expected by the contract (percentage * 100)
-          const tx = await this.oracleContract.updateVolatility(pool.poolId, volatility);
-          await tx.wait();
-          
-          console.log(`Update successful! Transaction: ${tx.hash}`);
-        } else {
-          console.log(`No update needed for ${pool.name}: Current vol = ${volatility / 100}%, Last vol = ${lastVolatility / 100}%`);
-        }
+          console.log(
+            `Updating ${pool.name}: Volatility = ${
+              volatility / 100
+            }% (change: ${volatilityDifference / 100}%)`
+          );
+*/
+        console.log(
+          `Updating ${pool.name} with volatility = ${volatility / 100}%`
+        );
+
+        // Convert volatility to the format expected by the contract (percentage * 100)
+        const tx = await this.oracleContract.updateVolatility(
+          pool.poolId,
+          volatility
+        );
+        await tx.wait();
+
+        console.log(`Update successful! Transaction: ${tx.hash}`);
+        /*        } else {
+          console.log(
+            `No update needed for ${pool.name}: Current vol = ${
+              volatility / 100
+            }%, Last vol = ${lastVolatility / 100}%`
+          );
+        } */
       } catch (error) {
         console.error(`Error updating oracle for ${pool.name}:`, error);
       }
     }
   }
-  
+
   /**
    * Start listening for swap events in real-time
    */
   private startSwapListeners() {
     for (const pool of this.pools) {
       console.log(`Starting swap listener for ${pool.name}...`);
-      
+
       const collector = this.dataCollectors.get(pool.poolId);
       if (!collector) continue;
-      
+
       collector.startListening(async (data) => {
         // Log significant price or volatility changes
-        if (data.volatility > 10) { // Only log significant volatility (>10%)
-          console.log(`${pool.name}: Price = ${data.price}, Volatility = ${data.volatility.toFixed(2)}%`);
-          
+        if (data.volatility > 10) {
+          // Only log significant volatility (>10%)
+          console.log(
+            `${pool.name}: Price = ${
+              data.price
+            }, Volatility = ${data.volatility.toFixed(2)}%`
+          );
+
           // Could trigger an immediate update for significant changes
-          if (data.volatility > 20) { // Very high volatility
-            console.log("High volatility detected! Triggering immediate update...");
+          if (data.volatility > 20) {
+            // Very high volatility
+            console.log(
+              "High volatility detected! Triggering immediate update..."
+            );
             await this.updateOracle();
           }
         }
@@ -157,31 +186,3 @@ export class OracleUpdater {
     }
   }
 }
-
-// Example usage
-async function main() {
-  // Replace with your actual values
-  const RPC_URL = 'https://mainnet.infura.io/v3/YOUR_INFURA_KEY';
-  const PRIVATE_KEY = 'YOUR_PRIVATE_KEY';
-  const ORACLE_ADDRESS = '0xYourDeployedOracleAddress';
-  
-  // Example pools to monitor
-  const pools = [
-    {
-      address: '0x4e68Ccd3E89f51C3074ca5072bbAC773960dFa36', // ETH-USDT
-      poolId: '0x4e68Ccd3E89f51C3074ca5072bbAC773960dFa36000000000000000000000000', // This would be the actual poolId generated by the hook
-      name: 'ETH-USDT'
-    }
-  ];
-  
-  const updater = new OracleUpdater(RPC_URL, PRIVATE_KEY, ORACLE_ADDRESS, pools);
-  
-  // Initialize with historical data
-  await updater.initialize();
-  
-  // Start monitoring and updating every 5 minutes
-  await updater.startMonitoring(5 * 60 * 1000);
-}
-
-// Uncomment to run
-// main().catch(console.error);
