@@ -18,7 +18,10 @@ export class SwapDataCollector {
     sqrtPriceX96: bigint;
   }[] = [];
 
-  constructor(rpcUrl: string = "https://ethereum-rpc.publicnode.com", poolAddress: string= "0x4e68Ccd3E89f51C3074ca5072bbAC773960dFa36") {
+  constructor(
+    rpcUrl: string = "https://1rpc.io/eth",
+    poolAddress: string = "0x4e68Ccd3E89f51C3074ca5072bbAC773960dFa36"
+  ) {
     this.provider = new ethers.JsonRpcProvider(rpcUrl);
     this.pool = new ethers.Contract(
       poolAddress,
@@ -36,8 +39,8 @@ export class SwapDataCollector {
     // For ETH/USDT pool, token0 is WETH and token1 is USDT
     // Price = (sqrtPriceX96 / 2^96)^2
     const numerator = sqrtPriceX96 * sqrtPriceX96;
-    const denominator = 2n ** 192n; // 2^192
-    return Number((numerator * 1_000_000n) / denominator) / 1_000_000;
+    const denominator = BigInt(2) ** BigInt(192); // 2^192
+    return Number((numerator * BigInt(1_000_000)) / denominator) / 1_000_000;
   }
 
   /**
@@ -84,18 +87,28 @@ export class SwapDataCollector {
     );
 
     if (relevantData.length < 2) {
-      console.log("Not enough price data points for volatility calculation");
+      console.warn("Not enough price data points for volatility calculation");
       return 0;
     }
 
     // Calculate price changes (returns) between consecutive data points
+    try {
     const returns: number[] = [];
     for (let i = 1; i < relevantData.length; i++) {
       const priceBefore = relevantData[i - 1].price;
       const priceAfter = relevantData[i].price;
+      if (priceBefore === 0) {
+        console.warn("Zero price encountered, skipping calculation");
+        continue;
+      }
+
       const returnPct = (priceAfter - priceBefore) / priceBefore;
       returns.push(returnPct);
     }
+    if (returns.length < 2) {
+      console.warn("Insufficient valid returns for volatility calculation");
+      return 0;
+  }
 
     // Calculate volatility as the standard deviation of returns
     const avgReturn = returns.reduce((sum, r) => sum + r, 0) / returns.length;
@@ -113,7 +126,11 @@ export class SwapDataCollector {
     const samplesPerYear = returns.length / timeSpanInYears;
     const annualizedVolatility = volatility * Math.sqrt(samplesPerYear) * 100;
 
-    return annualizedVolatility;
+    return isFinite(annualizedVolatility) ? annualizedVolatility : 0;
+} catch (error) {
+      console.error("Error calculating volatility:", error);
+      return 0;
+    }
   }
 
   /**
