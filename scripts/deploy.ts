@@ -2,7 +2,7 @@ import { ethers } from "hardhat";
 import fs from "fs";
 
 async function main() {
-  console.log("Deploying contracts to Sepolia...");
+  console.log("Deploying contracts to Sepolia with MockBaseHook...");
 
   // Get deployer account
   const [deployer] = await ethers.getSigners();
@@ -32,12 +32,11 @@ async function main() {
   );
   await feeCalculator.waitForDeployment();
 
-  // Get the target address for the deployed contract
   const feeCalculatorAddress = await feeCalculator.getAddress();
   console.log(`DynamicFeeCalculator deployed to: ${feeCalculatorAddress}`);
 
-  // 2. Deploy DynamicFeeHook
-  console.log("\nDeploying DynamicFeeHook...");
+  // 2. Deploy DynamicFeeHook (now using MockBaseHook)
+  console.log("\nDeploying DynamicFeeHook with MockBaseHook...");
   const DynamicFeeHookFactory = await ethers.getContractFactory(
     "DynamicFeeHook"
   );
@@ -82,6 +81,7 @@ async function main() {
     volatilityOracle: volatilityOracleAddress,
     deployer: deployer.address,
     timestamp: new Date().toISOString(),
+    hookType: "MockBaseHook",
     parameters: {
       baseFee: BASE_FEE,
       maxFee: MAX_FEE,

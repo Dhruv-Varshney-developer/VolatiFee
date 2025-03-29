@@ -7,7 +7,7 @@ import {PoolKey} from "@uniswap/v4-core/src/types/PoolKey.sol";
 import {BalanceDelta} from "@uniswap/v4-core/src/types/BalanceDelta.sol";
 import {LPFeeLibrary} from "@uniswap/v4-core/src/libraries/LPFeeLibrary.sol";
 import {BeforeSwapDelta, BeforeSwapDeltaLibrary} from "@uniswap/v4-core/src/types/BeforeSwapDelta.sol";
-import {BaseHook} from "@uniswap/v4-periphery/src/utils/BaseHook.sol";
+import {MockBaseHook} from "./MockBaseHook.sol";
 
 /**
  * @title IDynamicFeeCalculator
@@ -21,7 +21,7 @@ interface IDynamicFeeCalculator {
  * @title DynamicFeeHook
  * @notice Uniswap V4 hook that adjusts fees based on market volatility
  */
-contract DynamicFeeHook is BaseHook {
+contract DynamicFeeHook is MockBaseHook {
     using LPFeeLibrary for uint24;
 
     // Arbitrum Stylus fee calculator
@@ -66,7 +66,7 @@ contract DynamicFeeHook is BaseHook {
     constructor(
         IPoolManager _poolManager,
         address _feeCalculator
-    ) BaseHook(_poolManager) {
+    ) MockBaseHook(_poolManager) {
         feeCalculator = IDynamicFeeCalculator(_feeCalculator);
         owner = msg.sender;
     }
@@ -181,7 +181,7 @@ contract DynamicFeeHook is BaseHook {
         bytes calldata
     ) internal pure returns (bytes4) {
         require(key.fee.isDynamicFee(), "Pool must use dynamic fee");
-        return BaseHook.beforeInitialize.selector;
+        return MockBaseHook.beforeInitialize.selector;
     }
 
     /**
@@ -202,7 +202,7 @@ contract DynamicFeeHook is BaseHook {
 
         emit FeeUpdated(poolId, 0, DEFAULT_FEE);
 
-        return BaseHook.afterInitialize.selector;
+        return MockBaseHook.afterInitialize.selector;
     }
 
     /**
@@ -237,7 +237,7 @@ contract DynamicFeeHook is BaseHook {
         uint24 feeWithFlag = dynamicFee | LPFeeLibrary.OVERRIDE_FEE_FLAG;
 
         return (
-            BaseHook.beforeSwap.selector,
+            MockBaseHook.beforeSwap.selector,
             BeforeSwapDeltaLibrary.ZERO_DELTA,
             feeWithFlag
         );
