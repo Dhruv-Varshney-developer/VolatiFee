@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-pragma solidity ^0.8.0;
+pragma solidity ^0.8.26;
 
 import {IPoolManager} from "@uniswap/v4-core/src/interfaces/IPoolManager.sol";
 import {Hooks} from "@uniswap/v4-core/src/libraries/Hooks.sol";
@@ -7,41 +7,152 @@ import {PoolKey} from "@uniswap/v4-core/src/types/PoolKey.sol";
 import {BalanceDelta} from "@uniswap/v4-core/src/types/BalanceDelta.sol";
 import {LPFeeLibrary} from "@uniswap/v4-core/src/libraries/LPFeeLibrary.sol";
 import {BeforeSwapDelta, BeforeSwapDeltaLibrary} from "@uniswap/v4-core/src/types/BeforeSwapDelta.sol";
-import {TickMath} from "@uniswap/v4-core/src/libraries/TickMath.sol";
-
 import {BaseHook} from "@uniswap/v4-periphery/src/utils/BaseHook.sol";
 
-import {Oracle} from "./Oracle.sol";
+/**
+ * @title IDynamicFeeCalculator
+ * @notice Interface for the Arbitrum Stylus dynamic fee calculator
+ */
+interface IDynamicFeeCalculator {
+    function calculateFee(
+        uint32 volatility,
+        int32[] calldata additionalFeatures
+    ) external view returns (uint32 fee);
+}
 
-contract VolatilityBasedFeesHook is BaseHook {
+/**
+ * @title DynamicFeeHook
+ * @notice Uniswap V4 hook that adjusts fees based on market volatility
+ */
+contract DynamicFeeHook is BaseHook {
     using LPFeeLibrary for uint24;
 
-    // Base fee that will be adjusted based on volatility (0.3%)
-    uint24 public constant BASE_FEE = 3000;
+    // Arbitrum Stylus fee calculator
+    IDynamicFeeCalculator public feeCalculator;
 
-    // Maximum fee to prevent extreme values (1%)
-    uint24 public constant MAX_FEE = 10000;
+    // Default fee parameters (in hundredths of a bip, 100 = 0.01%)
+    uint24 public constant DEFAULT_FEE = 3000; // 0.3%
+    uint24 public constant MAX_FEE = 10000; // 1%
+    uint24 public constant MIN_FEE = 100; // 0.01%
 
-    // Volatility multiplier for fee calculation
-    uint24 public constant VOLATILITY_MULTIPLIER = 20;
+    // Owner address
+    address public owner;
 
-    // Oracle contract to handle price history and volatility calculation
-    Oracle public oracle;
+    // Volatility oracle
+    address public volatilityOracle;
 
-    // Maps pool IDs to their last recorded price
-    mapping(bytes32 => uint160) public lastPrices;
+    // Maps pool IDs to their current volatility
+    mapping(bytes32 => uint32) public poolVolatility;
 
-    // The constructor initializes the BaseHook parent with the pool manager
-    // and sets the Oracle contract address.
-    constructor(
-        IPoolManager _poolManager,
-        address _oracle
-    ) BaseHook(_poolManager) {
-        oracle = Oracle(_oracle);
+    // Store the last updated fees for each pool
+    mapping(bytes32 => uint24) public lastFees;
+    mapping(bytes32 => uint256) public lastFeeUpdate;
+
+    // Fee update cooldown period
+    uint256 public constant FEE_UPDATE_COOLDOWN = 1 hours;
+
+    // Events
+    event FeeUpdated(bytes32 indexed poolId, uint24 oldFee, uint24 newFee);
+    event VolatilityUpdated(bytes32 indexed poolId, uint32 volatility);
+
+    // Modifiers
+    modifier onlyOwner() {
+        require(msg.sender == owner, "Only owner");
+        _;
     }
 
-    // This function tells the pool manager which hooks are implemented.
-    // Here we enable beforeInitialize, afterInitialize, beforeSwap, and afterSwap.
+    modifier onlyOracle() {
+        require(msg.sender == volatilityOracle, "Only oracle");
+        _;
+    }
+
+    constructor(
+        IPoolManager _poolManager,
+        address _feeCalculator
+    ) BaseHook(_poolManager) {
+        feeCalculator = IDynamicFeeCalculator(_feeCalculator);
+        owner = msg.sender;
+    }
+
+    /**
+     * @notice Update the fee calculator address
+     * @param _feeCalculator New calculator address
+     */
+    function setFeeCalculator(address _feeCalculator) external onlyOwner {
+        feeCalculator = IDynamicFeeCalculator(_feeCalculator);
+    }
+
+    /**
+     * @notice Set the volatility oracle address
+     * @param _volatilityOracle New oracle address
+     */
+    function setVolatilityOracle(address _volatilityOracle) external onlyOwner {
+        volatilityOracle = _volatilityOracle;
+    }
+
+    /**
+     * @notice Update volatility for a pool (called by the oracle)
+     * @param poolId Pool identifier
+     * @param volatility New volatility value
+     */
+    function updateVolatility(
+        bytes32 poolId,
+        uint32 volatility
+    ) external onlyOracle {
+        poolVolatility[poolId] = volatility;
+        emit VolatilityUpdated(poolId, volatility);
+    }
+
+    /**
+     * @notice Calculate the dynamic fee for a pool
+     * @param poolId Pool identifier
+     * @return Dynamic fee based on current volatility
+     */
+    function calculateDynamicFee(bytes32 poolId) public view returns (uint24) {
+        uint32 volatility = poolVolatility[poolId];
+
+        // If no volatility data or calculator, use default fee
+        if (volatility == 0 || address(feeCalculator) == address(0)) {
+            return DEFAULT_FEE;
+        }
+
+        // Get additional features (empty for now, can be extended)
+        int32[] memory additionalFeatures = new int32[](0);
+
+        // Calculate fee using Stylus calculator
+        uint32 calculatedFee = feeCalculator.calculateFee(
+            volatility,
+            additionalFeatures
+        );
+
+        // Ensure fee is within bounds
+        if (calculatedFee < MIN_FEE) {
+            return MIN_FEE;
+        } else if (calculatedFee > MAX_FEE) {
+            return MAX_FEE;
+        }
+
+        return uint24(calculatedFee);
+    }
+
+    /**
+     * @notice Force update the fee for a pool
+     * @param key Pool key
+     */
+    function forceUpdateFee(PoolKey calldata key) external onlyOwner {
+        bytes32 poolId = keccak256(abi.encode(key));
+        uint24 oldFee = lastFees[poolId];
+        uint24 newFee = calculateDynamicFee(poolId);
+
+        lastFees[poolId] = newFee;
+        lastFeeUpdate[poolId] = block.timestamp;
+
+        emit FeeUpdated(poolId, oldFee, newFee);
+    }
+
+    /**
+     * @notice Returns the hook's permissions
+     */
     function getHookPermissions()
         public
         pure
@@ -57,7 +168,7 @@ contract VolatilityBasedFeesHook is BaseHook {
                 afterAddLiquidity: false,
                 afterRemoveLiquidity: false,
                 beforeSwap: true,
-                afterSwap: true,
+                afterSwap: false,
                 beforeDonate: false,
                 afterDonate: false,
                 beforeSwapReturnDelta: false,
@@ -67,60 +178,45 @@ contract VolatilityBasedFeesHook is BaseHook {
             });
     }
 
-    // -------------------- Initialization Hooks --------------------
+    // -------------------- Hook Implementation --------------------
 
-    // _beforeInitialize is called before a pool is initialized.
-    // Parameters:
-    //   - address: the caller (unused here)
-    //   - PoolKey key: structure containing pool parameters (tokens, fee settings, etc.)
-    //   - uint160: initial price parameter (unused)
-    //   - bytes: extra data (unused)
-    // The function requires that the pool’s fee flag is set for dynamic fee.
+    /**
+     * @notice Called before pool initialization
+     */
     function _beforeInitialize(
         address,
         PoolKey calldata key,
         uint160,
         bytes calldata
-    ) internal pure returns (bytes4) {
+    ) internal returns (bytes4) {
         require(key.fee.isDynamicFee(), "Pool must use dynamic fee");
-        return this.beforeInitialize.selector;
+        return BaseHook.beforeInitialize.selector;
     }
 
-    // _afterInitialize is called after the pool is initialized.
-    // It stores the initial pool price for use in volatility calculations.
-    // Parameters:
-    //   - address: the caller (unused)
-    //   - PoolKey key: structure containing pool parameters
-    //   - uint160 sqrtPriceX96: the initial square root price (in X96 fixed-point format)
-    //   - int24: the initial tick (unused)
-    //   - bytes: extra data (unused)
+    /**
+     * @notice Called after pool initialization
+     */
     function _afterInitialize(
         address,
         PoolKey calldata key,
-        uint160 sqrtPriceX96,
+        uint160,
         int24,
         bytes calldata
     ) internal returns (bytes4) {
-        // Create a unique pool ID from the pool key parameters.
         bytes32 poolId = keccak256(abi.encode(key));
-        // Store the initial price in the lastPrices mapping.
-        lastPrices[poolId] = sqrtPriceX96;
-        return this.afterInitialize.selector;
+
+        // Set initial fee to default
+        lastFees[poolId] = DEFAULT_FEE;
+        lastFeeUpdate[poolId] = block.timestamp;
+
+        emit FeeUpdated(poolId, 0, DEFAULT_FEE);
+
+        return BaseHook.afterInitialize.selector;
     }
 
-    // -------------------- Swap Hooks --------------------
-
-    // _beforeSwap is called before a swap is executed.
-    // It calculates the fee based on volatility and applies it for the swap.
-    // Parameters:
-    //   - address: the caller (unused)
-    //   - PoolKey key: pool parameters for the swap
-    //   - IPoolManager.SwapParams: parameters of the swap (unused here)
-    //   - bytes: extra data (unused)
-    // It returns:
-    //   - the function selector for beforeSwap,
-    //   - a zero delta (no adjustment to balances pre-swap),
-    //   - and the fee (with an override flag).
+    /**
+     * @notice Called before each swap
+     */
     function _beforeSwap(
         address,
         PoolKey calldata key,
@@ -129,67 +225,30 @@ contract VolatilityBasedFeesHook is BaseHook {
     ) internal override returns (bytes4, BeforeSwapDelta, uint24) {
         bytes32 poolId = keccak256(abi.encode(key));
 
-        // Calculate the fee based on the current volatility.
-        uint24 fee = calculateFee(poolId);
+        uint24 dynamicFee;
 
-        // Use LPFeeLibrary.OVERRIDE_FEE_FLAG to indicate that this fee should be used for this swap.
-        uint24 feeWithFlag = fee | LPFeeLibrary.OVERRIDE_FEE_FLAG;
+        // Check if it's time to update the fee
+        if (block.timestamp >= lastFeeUpdate[poolId] + FEE_UPDATE_COOLDOWN) {
+            uint24 oldFee = lastFees[poolId];
+            dynamicFee = calculateDynamicFee(poolId);
+
+            // Update last fee and timestamp
+            lastFees[poolId] = dynamicFee;
+            lastFeeUpdate[poolId] = block.timestamp;
+
+            emit FeeUpdated(poolId, oldFee, dynamicFee);
+        } else {
+            // Use the last calculated fee
+            dynamicFee = lastFees[poolId];
+        }
+
+        // Apply the dynamic fee with override flag
+        uint24 feeWithFlag = dynamicFee | LPFeeLibrary.OVERRIDE_FEE_FLAG;
 
         return (
-            this.beforeSwap.selector,
+            BaseHook.beforeSwap.selector,
             BeforeSwapDeltaLibrary.ZERO_DELTA,
             feeWithFlag
         );
-    }
-
-    // _afterSwap is called after a swap has been executed.
-    // Its primary role is to update the oracle with the new pool price,
-    // ensuring that future fee calculations reflect the latest market state.
-    // Parameters:
-    //   - address: the caller (unused)
-    //   - PoolKey key: pool parameters for the swap
-    //   - IPoolManager.SwapParams: parameters of the swap (unused here)
-    //   - BalanceDelta: change in pool balance (unused)
-    //   - bytes: extra data (unused)
-    function _afterSwap(
-        address,
-        PoolKey calldata key,
-        IPoolManager.SwapParams calldata,
-        BalanceDelta,
-        bytes calldata
-    ) internal override returns (bytes4, int128) {
-        bytes32 poolId = keccak256(abi.encode(key));
-
-        // Get the current pool price (sqrtPriceX96) from the pool manager.
-        uint160 sqrtPriceX96 = poolManager.getSlot0(key.toId()).sqrtPriceX96;
-
-        // Update the oracle with the latest price sample.
-        oracle.addPriceSample(poolId, sqrtPriceX96);
-
-        // Also update our record of the last price.
-        lastPrices[poolId] = sqrtPriceX96;
-
-        return (this.afterSwap.selector, 0);
-    }
-
-    // -------------------- Fee Calculation --------------------
-
-    // calculateFee computes the dynamic fee based on the volatility data from the oracle.
-    // It returns a fee which is the base fee plus an adjustment based on current volatility,
-    // capped at the maximum fee.
-    function calculateFee(bytes32 poolId) public view returns (uint24) {
-        // Retrieve the current volatility for the pool.
-        uint256 volatility = oracle.getVolatility(poolId);
-
-        // Calculate the fee adjustment using the volatility multiplier.
-        // Here the volatility is assumed to be normalized on a scale where 10000 represents 1%.
-        uint24 volatilityAdjustment = uint24(
-            (volatility * VOLATILITY_MULTIPLIER) / 10000
-        );
-
-        // Add the adjustment to the base fee.
-        uint24 calculatedFee = BASE_FEE + volatilityAdjustment;
-        // Cap the fee at MAX_FEE.
-        return calculatedFee > MAX_FEE ? MAX_FEE : calculatedFee;
     }
 }
