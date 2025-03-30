@@ -36,13 +36,36 @@ export class SwapDataCollector {
    * @returns The actual price
    */
   private sqrtPriceX96ToPrice(sqrtPriceX96: bigint): number {
-    // For ETH/USDT pool, token0 is WETH and token1 is USDT
-    // Price = (sqrtPriceX96 / 2^96)^2
-    const numerator = sqrtPriceX96 * sqrtPriceX96;
-    const denominator = BigInt(2) ** BigInt(192); // 2^192
-    return Number((numerator * BigInt(1_000_000)) / denominator) / 1_000_000;
-  }
+    try {
+      const TOKEN0_DECIMALS = 18; // WETH
+      const TOKEN1_DECIMALS = 6;  // USDT
+      const decimalAdjustment = 10 ** (TOKEN0_DECIMALS - TOKEN1_DECIMALS);
 
+
+      // Q64.96 fixed point number conversion for Uniswap V3 price
+      // Price = (sqrtPriceX96 / 2^96)^2
+      // We need high precision to avoid losing decimal information
+
+      // First, convert sqrtPriceX96 to a decimal representation
+      const Q96 = BigInt(2) ** BigInt(96);
+
+      // Divide sqrtPriceX96 by 2^96 to get the base price ratio
+      const baseRatio =
+        Number((sqrtPriceX96 * BigInt(1_000_000_000_000)) / Q96) /
+        1_000_000_000_000;
+
+      // Square the ratio to get the actual price
+      const priceBeforeAdjustment = baseRatio * baseRatio;
+      const price = priceBeforeAdjustment * decimalAdjustment;
+
+      // For ETH/USDT, we want USDT per ETH
+      // WETH is token0, USDT is token1 in this pool
+      return price > 0 ? price : 0;
+    } catch (error) {
+      console.error("Error converting sqrtPriceX96 to price:", error);
+      return 0;
+    }
+  }
   /**
    * Get the current price from the pool
    */
@@ -93,41 +116,41 @@ export class SwapDataCollector {
 
     // Calculate price changes (returns) between consecutive data points
     try {
-    const returns: number[] = [];
-    for (let i = 1; i < relevantData.length; i++) {
-      const priceBefore = relevantData[i - 1].price;
-      const priceAfter = relevantData[i].price;
-      if (priceBefore === 0) {
-        console.warn("Zero price encountered, skipping calculation");
-        continue;
+      const returns: number[] = [];
+      for (let i = 1; i < relevantData.length; i++) {
+        const priceBefore = relevantData[i - 1].price;
+        const priceAfter = relevantData[i].price;
+        if (priceBefore === 0) {
+          console.warn("Zero price encountered, skipping calculation");
+          continue;
+        }
+
+        const returnPct = (priceAfter - priceBefore) / priceBefore;
+        returns.push(returnPct);
+      }
+      if (returns.length < 2) {
+        console.warn("Insufficient valid returns for volatility calculation");
+        return 0;
       }
 
-      const returnPct = (priceAfter - priceBefore) / priceBefore;
-      returns.push(returnPct);
-    }
-    if (returns.length < 2) {
-      console.warn("Insufficient valid returns for volatility calculation");
-      return 0;
-  }
+      // Calculate volatility as the standard deviation of returns
+      const avgReturn = returns.reduce((sum, r) => sum + r, 0) / returns.length;
+      const squaredDiffs = returns.map((r) => Math.pow(r - avgReturn, 2));
+      const variance =
+        squaredDiffs.reduce((sum, sd) => sum + sd, 0) / returns.length;
+      const volatility = Math.sqrt(variance);
 
-    // Calculate volatility as the standard deviation of returns
-    const avgReturn = returns.reduce((sum, r) => sum + r, 0) / returns.length;
-    const squaredDiffs = returns.map((r) => Math.pow(r - avgReturn, 2));
-    const variance =
-      squaredDiffs.reduce((sum, sd) => sum + sd, 0) / returns.length;
-    const volatility = Math.sqrt(variance);
+      // Annualize and convert to percentage
+      // Assuming data points are roughly evenly spaced in time
+      const timeSpanInSeconds =
+        relevantData[relevantData.length - 1].timestamp -
+        relevantData[0].timestamp;
+      const timeSpanInYears = timeSpanInSeconds / (365 * 24 * 3600);
+      const samplesPerYear = returns.length / timeSpanInYears;
+      const annualizedVolatility = volatility * Math.sqrt(samplesPerYear) * 100;
 
-    // Annualize and convert to percentage
-    // Assuming data points are roughly evenly spaced in time
-    const timeSpanInSeconds =
-      relevantData[relevantData.length - 1].timestamp -
-      relevantData[0].timestamp;
-    const timeSpanInYears = timeSpanInSeconds / (365 * 24 * 3600);
-    const samplesPerYear = returns.length / timeSpanInYears;
-    const annualizedVolatility = volatility * Math.sqrt(samplesPerYear) * 100;
-
-    return isFinite(annualizedVolatility) ? annualizedVolatility : 0;
-} catch (error) {
+      return isFinite(annualizedVolatility) ? annualizedVolatility : 0;
+    } catch (error) {
       console.error("Error calculating volatility:", error);
       return 0;
     }
@@ -232,7 +255,11 @@ export class SwapDataCollector {
         const block = await event.getBlock();
 
         const price = this.sqrtPriceX96ToPrice(args.sqrtPriceX96);
-
+        if (price > 0) {
+          console.log(
+            `Event - Price: ${price}, Tick: ${args.tick}, Timestamp: ${block.timestamp}`
+          );
+        }
         // Add to price history
         this.priceData.push({
           timestamp: block.timestamp,
