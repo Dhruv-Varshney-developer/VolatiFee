@@ -65,7 +65,7 @@
     <div class="metrics">
       <div class="metric-card">
         <h3>LP Return Improvement</h3>
-        <div class="metric-value positive">+30.8%</div>
+        <div class="metric-value positive">+22.7%</div>
         <p>Increased LP returns with dynamic fees</p>
       </div>
       <div class="metric-card">
@@ -81,13 +81,7 @@
     </div>
 
     <script>
-      // Actual data from the hook calculation
-    const timeLabels = ["Low Volatility (Jan)","Medium Volatility (Mar)","High Volatility (Jul)","Current"];
-    const volatilityData = [2.1,5.3,12.8,33.07075662064013];
-    const fixedFee = 0.3;
-    const dynamicFees = [0.3105,0.3265,0.364,0.4653];
-    const fixedFeeReturns = [33.95,32.35,28.6,18.464621689679934];
-    const dynamicFeeReturns = [35,35,35,34.99462168967993];
+      // This is replaced with actual data on running the generate-comparison.ts script
       const volatilityData = [
         2.1, 2.3, 2.0, 3.5, 7.8, 12.4, 15.2, 10.1, 6.2, 3.1, 2.5, 2.0,
       ];
@@ -140,7 +134,7 @@
             },
             {
               label: "Fixed Fee (0.3%)",
-              data: Array(12).fill(fixedFee),
+              data: Array(4).fill(fixedFee),
               borderColor: "rgba(53, 162, 235, 0.8)",
               backgroundColor: "rgba(53, 162, 235, 0.2)",
               borderWidth: 3,

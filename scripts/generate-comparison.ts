@@ -91,20 +91,20 @@ async function generateComparisonChart() {
     "utf8"
   );
 
-  // Insert actual data
   template = template.replace(
-    "// Sample data - you can replace with real data from your project",
-    `// Actual data from the hook calculation
-    const timeLabels = ${JSON.stringify(results.map((r) => r.label))};
+    /\/\/ This is replaced with actual data on running the generate-comparison\.ts script[\s\S]*?const timeLabels = \[(.*?)\];/,
+    `// Actual data from VolatiFee's deployed smart contracts
     const volatilityData = ${JSON.stringify(results.map((r) => r.volatility))};
     const fixedFee = ${FIXED_FEE};
     const dynamicFees = ${JSON.stringify(results.map((r) => r.dynamicFee))};
-    const fixedFeeReturns = ${JSON.stringify(
-      results.map((r) => r.fixedFeeReturn)
-    )};
-    const dynamicFeeReturns = ${JSON.stringify(
-      results.map((r) => r.dynamicFeeReturn)
-    )};`
+    const fixedFeeReturns = ${JSON.stringify(results.map((r) => r.fixedFeeReturn))};
+    const dynamicFeeReturns = ${JSON.stringify(results.map((r) => r.dynamicFeeReturn))};
+    const timeLabels = ${JSON.stringify(results.map((r) => r.label))};`
+  );
+  
+  template = template.replace(
+    "Array(12).fill(fixedFee)",
+    `Array(${results.length}).fill(fixedFee)`
   );
 
   // Update metrics cards with actual data
