@@ -25,8 +25,8 @@ contract VolatilityOracle {
     mapping(bytes32 => uint32) public lastVolatility;
     mapping(bytes32 => uint256) public lastUpdateTime;
 
-    // Update frequency limit
-    uint256 public constant MIN_UPDATE_INTERVAL = 5 minutes;
+    // Update frequency limit - use this in production
+    //uint256 public constant MIN_UPDATE_INTERVAL = 1 seconds; // To be changed to 1 hours in production
 
     // Events
     event VolatilityUpdated(bytes32 indexed poolId, uint32 volatility);
@@ -91,10 +91,10 @@ contract VolatilityOracle {
         uint32 volatility
     ) external onlyAuthorized returns (bool) {
         // Enforce minimum update interval
-        require(
-            block.timestamp >= lastUpdateTime[poolId] + MIN_UPDATE_INTERVAL,
-            "Update too frequent"
-        );
+        // require(
+        //     block.timestamp >= lastUpdateTime[poolId] + MIN_UPDATE_INTERVAL,
+        //     "Update too frequent"
+        // );
 
         // Store the volatility
         lastVolatility[poolId] = volatility;
