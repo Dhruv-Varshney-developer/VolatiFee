@@ -46,7 +46,7 @@ contract DynamicFeeHook is MockBaseHook {
     mapping(bytes32 => uint256) public lastFeeUpdate;
 
     // Fee update cooldown period
-    uint256 public constant FEE_UPDATE_COOLDOWN = 1 hours;
+    uint256 public constant FEE_UPDATE_COOLDOWN = 1 seconds;
 
     // Events
     event FeeUpdated(bytes32 indexed poolId, uint24 oldFee, uint24 newFee);
