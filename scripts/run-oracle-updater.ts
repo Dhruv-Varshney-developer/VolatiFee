@@ -8,7 +8,7 @@ async function main() {
   // Get configuration from environment or use defaults
   const ETH_MAINNET_RPC = process.env.ETHEREUM_RPC_URL || 'https://ethereum-rpc.publicnode.com';
   const PRIVATE_KEY = process.env.PRIVATE_KEY || '';
-  const ORACLE_ADDRESS = process.env.ORACLE_ADDRESS || '0xea1C214FAC68B307073f0d5657B2C8C83fD4682D';
+  const ORACLE_ADDRESS = process.env.ORACLE_ADDRESS || '';
   
   if (!PRIVATE_KEY) {
     console.error("ERROR: Private key not found in environment variables");
