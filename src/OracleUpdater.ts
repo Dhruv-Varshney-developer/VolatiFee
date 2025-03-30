@@ -150,7 +150,7 @@ export class OracleUpdater {
           pool.poolId,
           volatility,
           {
-            gasLimit: estimatedGas * BigInt(2), // Add some buffer
+            gasLimit: estimatedGas * BigInt(2), // buffer
             gasPrice: gasPrice,
           }
         );
