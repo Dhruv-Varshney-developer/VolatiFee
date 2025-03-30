@@ -12,7 +12,7 @@ VolatiFee is a Uniswap V4 hook that provides dynamic fee adjustment based on mar
 
 ## Architecture:
 
-![Architecture](architecture.png)
+![Architecture](Architecture.png)
 
 ## Prerequisites
 
