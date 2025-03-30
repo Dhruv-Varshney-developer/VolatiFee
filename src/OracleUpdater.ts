@@ -15,20 +15,23 @@ interface PoolInfo {
 }
 
 export class OracleUpdater {
-  private provider: ethers.Provider;
+  private mainnetProvider: ethers.Provider;
+  private sepoliaProvider: ethers.Provider;
   private wallet: ethers.Wallet;
   private oracleContract: ethers.Contract;
   private dataCollectors: Map<string, SwapDataCollector> = new Map();
   private pools: PoolInfo[] = [];
 
   constructor(
-    rpcUrl: string,
+    mainnetRpcUrl: string,
+    sepoliaRpcUrl: string,
     privateKey: string,
     oracleAddress: string,
     pools: PoolInfo[]
   ) {
-    this.provider = new ethers.JsonRpcProvider(rpcUrl);
-    this.wallet = new ethers.Wallet(privateKey, this.provider);
+    this.mainnetProvider = new ethers.JsonRpcProvider(mainnetRpcUrl);
+    this.sepoliaProvider = new ethers.JsonRpcProvider(sepoliaRpcUrl);
+    this.wallet = new ethers.Wallet(privateKey, this.sepoliaProvider);
     this.oracleContract = new ethers.Contract(
       oracleAddress,
       ORACLE_ABI,
@@ -40,7 +43,7 @@ export class OracleUpdater {
     for (const pool of pools) {
       this.dataCollectors.set(
         pool.poolId, // Still use poolId as key for mapping
-        new SwapDataCollector(rpcUrl, pool.address) // Use pool address for collector
+        new SwapDataCollector(mainnetRpcUrl, pool.address) // Use pool address for collector
       );
     }
   }
@@ -106,28 +109,38 @@ export class OracleUpdater {
 
         // Use medium-term volatility (1 day) for the fee calculation
         const volatility = Math.round(metrics.mediumTerm);
-        /*
-        // Check if update is needed (value changed or time elapsed)
-        const lastUpdateTime = await this.oracleContract.lastUpdateTime(
-          pool.poolId
+
+        console.log(
+          `Updating ${pool.name} with volatility = ${volatility / 100}%`
         );
-        const lastVolatility = await this.oracleContract.lastVolatility(
-          pool.poolId
+        // Check wallet balance
+        const balance = await this.sepoliaProvider.getBalance(this.wallet.address);
+        const feeData = await this.sepoliaProvider.getFeeData();
+        const gasPrice = feeData.gasPrice || ethers.parseUnits("20", "gwei");
+
+        console.log(`Wallet Balance: ${ethers.formatEther(balance)} ETH`);
+        console.log(
+          `Current Gas Price: ${ethers.formatUnits(gasPrice, "gwei")} gwei`
         );
 
-        const timeSinceLastUpdate =
-          Date.now() / 1000 - lastUpdateTime.toNumber();
-        const volatilityDifference = Math.abs(lastVolatility - volatility);
-        const significantChange = volatilityDifference > 50; // 0.5% change threshold
-
-        // Update if significant change or more than 1 hour passed
-        if (significantChange || timeSinceLastUpdate > 3600) {
-          console.log(
-            `Updating ${pool.name}: Volatility = ${
-              volatility / 100
-            }% (change: ${volatilityDifference / 100}%)`
+        // Estimate gas
+        const estimatedGas =
+          await this.oracleContract.updateVolatility.estimateGas(
+            pool.poolId,
+            volatility
           );
-*/
+        const gasCost = estimatedGas * gasPrice;
+
+        console.log(`Estimated Gas: ${estimatedGas}`);
+        console.log(`Estimated Gas Cost: ${ethers.formatEther(gasCost)} ETH`);
+
+        // Check if balance is sufficient
+        if (balance <= gasCost) {
+          throw new Error(
+            `Insufficient balance. Need ${ethers.formatEther(gasCost)} ETH`
+          );
+        }
+
         console.log(
           `Updating ${pool.name} with volatility = ${volatility / 100}%`
         );
@@ -135,18 +148,15 @@ export class OracleUpdater {
         // Convert volatility to the format expected by the contract (percentage * 100)
         const tx = await this.oracleContract.updateVolatility(
           pool.poolId,
-          volatility
+          volatility,
+          {
+            gasLimit: estimatedGas * BigInt(2), // Add some buffer
+            gasPrice: gasPrice,
+          }
         );
         await tx.wait();
 
         console.log(`Update successful! Transaction: ${tx.hash}`);
-        /*        } else {
-          console.log(
-            `No update needed for ${pool.name}: Current vol = ${
-              volatility / 100
-            }%, Last vol = ${lastVolatility / 100}%`
-          );
-        } */
       } catch (error) {
         console.error(`Error updating oracle for ${pool.name}:`, error);
       }
